@@ -1,0 +1,25 @@
+[package]
+name = "k-ssh-agent"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+toml = "1.0.7"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+thiserror = "2.0.18"
+anyhow = "1.0.102"
+tokio = { version = "1.50.0", features = ["full"] }
+zeroize = "1.8.2"
+secrecy = "0.10.3"
+ssh-key = "0.6.7"
+ssh-encoding = "0.2.0"
+ssh-cipher = "0.2.0"
+dirs = "6.0.0"
+tempfile = "3.27.0"
+clap = { version = "4.6.0", features = ["derive"] }
+async-trait = "0.1.89"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+ssh2-config = "0.7"
+libc = "0.2"
