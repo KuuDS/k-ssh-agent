@@ -166,7 +166,7 @@ main() {
     fi
     
     local extracted_binary
-    extracted_binary=$(find . -name "$BINARY_NAME" -type f | head -n 1)
+    extracted_binary=$(find . -type f \( -name "$BINARY_NAME" -o -name "${BINARY_NAME}*" \) | head -n 1)
     if [ -z "$extracted_binary" ]; then
         print_error "Could not find binary in archive"
         exit 1
