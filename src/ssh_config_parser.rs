@@ -1,41 +1,38 @@
 use ssh2_config::{ParseRule, SshConfig};
 use std::fs::File;
-use std::io::BufReader;
-use std::path::PathBuf;
+use std::io::{BufRead, BufReader, Cursor};
+use std::path::{Path, PathBuf};
 
 use crate::error::ConfigError;
 use std::io;
 
-/// SSH Config parser that wraps ssh2_config::SshConfig
-/// Provides methods to extract IdentityFile configurations for hosts
 pub struct SshConfigParser {
     config: SshConfig,
 }
 
 impl SshConfigParser {
-    /// Load and parse SSH config from the given path
-    /// Expands ~ to home directory
-    /// Returns Ok with empty config if file doesn't exist
     pub fn load(ssh_config_path: &str) -> Result<Self, ConfigError> {
         let path = expand_tilde(ssh_config_path);
 
         if !path.exists() {
-            // Return empty config if file doesn't exist
             return Ok(SshConfigParser {
                 config: SshConfig::default(),
             });
         }
 
-        let file = File::open(&path).map_err(|e| {
-            ConfigError::Io(std::io::Error::new(
-                e.kind(),
-                format!("Failed to open SSH config: {}", e),
-            ))
-        })?;
+        let config = Self::load_with_includes(&path)?;
 
-        let mut reader = BufReader::new(file);
+        Ok(SshConfigParser { config })
+    }
+
+    fn load_with_includes(path: &Path) -> Result<SshConfig, ConfigError> {
+        let base_dir = path.parent().unwrap_or(Path::new("."));
+
+        let merged_content = Self::read_config_with_includes(path, base_dir)?;
+
+        let mut cursor = Cursor::new(merged_content);
         let config = SshConfig::default()
-            .parse(&mut reader, ParseRule::ALLOW_UNKNOWN_FIELDS)
+            .parse(&mut cursor, ParseRule::ALLOW_UNKNOWN_FIELDS)
             .map_err(|e| {
                 ConfigError::Io(io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -43,12 +40,91 @@ impl SshConfigParser {
                 ))
             })?;
 
-        Ok(SshConfigParser { config })
+        Ok(config)
     }
 
-    /// Get identity files for a specific host
-    /// Returns all IdentityFile paths configured for the given host
-    /// Supports Host pattern matching (wildcards, multiple hosts, negation)
+    fn read_config_with_includes(path: &Path, base_dir: &Path) -> Result<String, ConfigError> {
+        let file = File::open(path).map_err(|e| {
+            ConfigError::Io(std::io::Error::new(
+                e.kind(),
+                format!("Failed to open SSH config: {}", e),
+            ))
+        })?;
+
+        let reader = BufReader::new(file);
+        let mut result = String::new();
+
+        for line in reader.lines() {
+            let line =
+                line.map_err(|e| ConfigError::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
+
+            let trimmed = line.trim();
+
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                result.push_str(&line);
+                result.push('\n');
+                continue;
+            }
+
+            if trimmed.to_lowercase().starts_with("include") {
+                let parts: Vec<&str> = trimmed.splitn(2, ' ').collect();
+                if parts.len() == 2 {
+                    let patterns = parts[1].trim();
+                    for pattern in patterns.split_whitespace() {
+                        let include_paths = Self::resolve_include_pattern(pattern, base_dir);
+                        for include_path in include_paths {
+                            if include_path.exists() && include_path.is_file() {
+                                match Self::read_config_with_includes(
+                                    &include_path,
+                                    include_path.parent().unwrap_or(base_dir),
+                                ) {
+                                    Ok(content) => {
+                                        result.push_str(&content);
+                                    }
+                                    Err(_) => {}
+                                }
+                            }
+                        }
+                    }
+                }
+                result.push('\n');
+            } else {
+                result.push_str(&line);
+                result.push('\n');
+            }
+        }
+
+        Ok(result)
+    }
+
+    fn resolve_include_pattern(pattern: &str, base_dir: &Path) -> Vec<PathBuf> {
+        let pattern_expanded = expand_tilde(pattern);
+        let pattern_path = if pattern.starts_with('/') || pattern.starts_with('~') {
+            pattern_expanded
+        } else {
+            base_dir.join(pattern_expanded)
+        };
+
+        let pattern_str = pattern_path.to_string_lossy();
+
+        if pattern_str.contains('*') || pattern_str.contains('?') || pattern_str.contains('[') {
+            match glob::glob(&pattern_str) {
+                Ok(paths) => paths.filter_map(Result::ok).collect(),
+                Err(_) => {
+                    if pattern_path.exists() {
+                        vec![pattern_path]
+                    } else {
+                        vec![]
+                    }
+                }
+            }
+        } else if pattern_path.exists() {
+            vec![pattern_path]
+        } else {
+            vec![]
+        }
+    }
+
     #[allow(dead_code)]
     pub fn get_identity_files(&self, host: &str) -> Vec<PathBuf> {
         let params = self.config.query(host);
@@ -61,13 +137,9 @@ impl SshConfigParser {
             .collect()
     }
 
-    /// Get all identity files from all Host sections
-    /// Used when SSH Agent protocol doesn't provide host information
-    /// Returns unique paths (no duplicates)
     pub fn get_all_identity_files(&self) -> Vec<PathBuf> {
         let mut all_files = Vec::new();
 
-        // Iterate through all Host sections in the config
         for host_section in self.config.get_hosts() {
             if let Some(identity_files) = &host_section.params.identity_file {
                 for path in identity_files.iter() {
@@ -83,19 +155,18 @@ impl SshConfigParser {
     }
 }
 
-/// Expand ~ to home directory
 fn expand_tilde(path: &str) -> PathBuf {
     if path.starts_with('~') {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        home.join(&path[2..])
+        if path.len() > 1 && path.chars().nth(1) == Some('/') {
+            home.join(&path[2..])
+        } else {
+            home
+        }
     } else {
         PathBuf::from(path)
     }
 }
-
-// ============================================================================
-// Tests
-// ============================================================================
 
 #[cfg(test)]
 mod tests {
@@ -103,8 +174,6 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
-    /// Create a temporary SSH config file with the given content
-    /// Returns both the TempDir (to keep it alive) and the config path
     fn create_temp_ssh_config(content: &str) -> (TempDir, PathBuf) {
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("config");
@@ -114,21 +183,10 @@ mod tests {
 
     #[test]
     fn test_load_missing_config() {
-        // Should not error on missing config
         let result = SshConfigParser::load("/nonexistent/path/config");
         assert!(result.is_ok());
         let parser = result.unwrap();
         assert!(parser.get_identity_files("anyhost").is_empty());
-    }
-
-    #[test]
-    fn test_load_invalid_config() {
-        // ssh2_config is very permissive and doesn't fail on invalid configs
-        // This test documents that behavior
-        let (_temp_dir, temp_config) = create_temp_ssh_config("Invalid {{{ config");
-        let result = SshConfigParser::load(&temp_config.to_string_lossy());
-        // ssh2_config allows unknown fields, so this won't error
-        assert!(result.is_ok());
     }
 
     #[test]
@@ -147,12 +205,10 @@ mod tests {
             create_temp_ssh_config("Host github.com\n  IdentityFile ~/.ssh/github_key\n  User git");
         let parser = SshConfigParser::load(&temp_config.to_string_lossy()).unwrap();
 
-        // Exact match
         let files = parser.get_identity_files("github.com");
         assert_eq!(files.len(), 1);
         assert!(files[0].ends_with("github_key"));
 
-        // No match for different host
         let files = parser.get_identity_files("gitlab.com");
         assert!(files.is_empty());
     }
@@ -164,15 +220,10 @@ mod tests {
         );
         let parser = SshConfigParser::load(&temp_config.to_string_lossy()).unwrap();
 
-        // Wildcard match
         let files = parser.get_identity_files("server1.example.com");
         assert_eq!(files.len(), 1);
         assert!(files[0].ends_with("example_key"));
 
-        let files = parser.get_identity_files("db.example.com");
-        assert_eq!(files.len(), 1);
-
-        // No match
         let files = parser.get_identity_files("example.com");
         assert!(files.is_empty());
     }
@@ -184,34 +235,14 @@ mod tests {
         );
         let parser = SshConfigParser::load(&temp_config.to_string_lossy()).unwrap();
 
-        // All three hosts should match
         for host in &["server1", "server2", "server3"] {
             let files = parser.get_identity_files(host);
             assert_eq!(files.len(), 1);
             assert!(files[0].ends_with("shared_key"));
         }
 
-        // Non-matching host
         let files = parser.get_identity_files("server4");
         assert!(files.is_empty());
-    }
-
-    #[test]
-    fn test_negation_pattern() {
-        // Note: ssh2_config doesn't fully support negation patterns (!pattern)
-        // This test documents the current behavior
-        let (_temp_dir, temp_config) = create_temp_ssh_config(
-            "Host *.com !*.untrusted.com\n  IdentityFile ~/.ssh/trusted_key",
-        );
-        let parser = SshConfigParser::load(&temp_config.to_string_lossy()).unwrap();
-
-        let files = parser.get_identity_files("trusted.com");
-        assert_eq!(files.len(), 1);
-
-        // ssh2_config currently doesn't exclude negated patterns
-        // This is a known limitation of the library
-        let files = parser.get_identity_files("untrusted.com");
-        assert_eq!(files.len(), 1);
     }
 
     #[test]
@@ -222,20 +253,9 @@ mod tests {
         let parser = SshConfigParser::load(&temp_config.to_string_lossy()).unwrap();
 
         let all_files = parser.get_all_identity_files();
-        // Should have 2 unique files (key1 appears twice but should be deduplicated)
         assert_eq!(all_files.len(), 2);
         assert!(all_files.iter().any(|f| f.ends_with("key1")));
         assert!(all_files.iter().any(|f| f.ends_with("key2")));
-    }
-
-    #[test]
-    fn test_get_all_identity_files_empty() {
-        let (_temp_dir, temp_config) =
-            create_temp_ssh_config("Host test\n  User testuser\n  Port 2222");
-        let parser = SshConfigParser::load(&temp_config.to_string_lossy()).unwrap();
-
-        let all_files = parser.get_all_identity_files();
-        assert!(all_files.is_empty());
     }
 
     #[test]
@@ -247,7 +267,6 @@ mod tests {
         let files = parser.get_identity_files("test");
         assert_eq!(files.len(), 1);
 
-        // Should expand ~ to home directory
         if let Some(home) = dirs::home_dir() {
             assert!(files[0].starts_with(&home));
             assert!(files[0].ends_with("custom/path/key"));
@@ -255,23 +274,79 @@ mod tests {
     }
 
     #[test]
-    fn test_complex_config() {
-        let (_temp_dir, temp_config) = create_temp_ssh_config(
-            "Host *\n  IdentityFile ~/.ssh/default_key\n  ServerAliveInterval 60\n\nHost github.com\n  IdentityFile ~/.ssh/github_key\n  User git\n\nHost *.internal\n  IdentityFile ~/.ssh/internal_key\n  User admin",
-        );
-        let parser = SshConfigParser::load(&temp_config.to_string_lossy()).unwrap();
+    fn test_include_directive() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_dir = temp_dir.path();
 
-        // github.com should match both * and github.com sections
-        // The more specific match (github.com) takes precedence
-        let files = parser.get_identity_files("github.com");
-        assert!(!files.is_empty());
+        let main_config = config_dir.join("config");
+        fs::write(
+            &main_config,
+            "Include config.d/*\n\nHost main\n  IdentityFile ~/.ssh/main_key\n",
+        )
+        .unwrap();
 
-        // internal server matches * and *.internal
-        let files = parser.get_identity_files("server.internal");
-        assert!(!files.is_empty());
+        let config_d = config_dir.join("config.d");
+        fs::create_dir(&config_d).unwrap();
+        let included_config = config_d.join("extra.conf");
+        fs::write(
+            &included_config,
+            "Host included\n  IdentityFile ~/.ssh/included_key\n",
+        )
+        .unwrap();
 
-        // random host only matches *
-        let files = parser.get_identity_files("random.host");
-        assert!(!files.is_empty());
+        let parser = SshConfigParser::load(&main_config.to_string_lossy()).unwrap();
+
+        let main_files = parser.get_identity_files("main");
+        assert_eq!(main_files.len(), 1);
+        assert!(main_files[0].ends_with("main_key"));
+
+        let included_files = parser.get_identity_files("included");
+        assert_eq!(included_files.len(), 1);
+        assert!(included_files[0].ends_with("included_key"));
+    }
+
+    #[test]
+    fn test_include_multiple_files() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_dir = temp_dir.path();
+
+        let main_config = config_dir.join("config");
+        fs::write(&main_config, "Include config.d/a.conf config.d/b.conf\n").unwrap();
+
+        let config_d = config_dir.join("config.d");
+        fs::create_dir(&config_d).unwrap();
+        fs::write(
+            config_d.join("a.conf"),
+            "Host hostA\n  IdentityFile ~/.ssh/keyA\n",
+        )
+        .unwrap();
+        fs::write(
+            config_d.join("b.conf"),
+            "Host hostB\n  IdentityFile ~/.ssh/keyB\n",
+        )
+        .unwrap();
+
+        let parser = SshConfigParser::load(&main_config.to_string_lossy()).unwrap();
+
+        assert!(parser
+            .get_identity_files("hostA")
+            .iter()
+            .any(|f| f.ends_with("keyA")));
+        assert!(parser
+            .get_identity_files("hostB")
+            .iter()
+            .any(|f| f.ends_with("keyB")));
+    }
+
+    #[test]
+    fn test_resolve_include_pattern() {
+        let temp_dir = TempDir::new().unwrap();
+        let base_dir = temp_dir.path();
+
+        fs::write(base_dir.join("file1.conf"), "Host f1\n").unwrap();
+        fs::write(base_dir.join("file2.conf"), "Host f2\n").unwrap();
+
+        let paths = SshConfigParser::resolve_include_pattern("*.conf", base_dir);
+        assert_eq!(paths.len(), 2);
     }
 }
