@@ -35,22 +35,27 @@ impl KeyProvider for BitwardenProvider {
                 .arg("list")
                 .output()
                 .await
-                .map_err(|e| bitwarden_error_to_provider_error(BitwardenError::CommandFailed(e.to_string())))
-        }).await;
+                .map_err(|e| {
+                    bitwarden_error_to_provider_error(BitwardenError::CommandFailed(e.to_string()))
+                })
+        })
+        .await;
 
         let output = match output_result {
             Ok(Ok(output)) => output,
             Ok(Err(e)) => return Err(e),
             Err(_) => {
-                return Err(bitwarden_error_to_provider_error(BitwardenError::CommandFailed(
-                    "Bitwarden CLI timed out".to_string(),
-                )))
+                return Err(bitwarden_error_to_provider_error(
+                    BitwardenError::CommandFailed("Bitwarden CLI timed out".to_string()),
+                ))
             }
         };
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(bitwarden_error_to_provider_error(BitwardenError::CommandFailed(stderr.to_string())));
+            return Err(bitwarden_error_to_provider_error(
+                BitwardenError::CommandFailed(stderr.to_string()),
+            ));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);

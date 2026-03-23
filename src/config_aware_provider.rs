@@ -72,24 +72,14 @@ impl ConfigAwareProvider {
 
                 match std::fs::read_to_string(&pub_path) {
                     Ok(contents) => match PublicKey::from_openssh(&contents) {
-                        Ok(pub_key) => {
-                            Some(pub_key.fingerprint(HashAlg::Sha256).to_string())
-                        }
+                        Ok(pub_key) => Some(pub_key.fingerprint(HashAlg::Sha256).to_string()),
                         Err(e) => {
-                            tracing::warn!(
-                                "Failed to parse public key file {:?}: {}",
-                                pub_path,
-                                e
-                            );
+                            tracing::warn!("Failed to parse public key file {:?}: {}", pub_path, e);
                             None
                         }
                     },
                     Err(e) => {
-                        tracing::warn!(
-                            "Could not read public key file {:?}: {}",
-                            pub_path,
-                            e
-                        );
+                        tracing::warn!("Could not read public key file {:?}: {}", pub_path, e);
                         None
                     }
                 }
@@ -323,9 +313,8 @@ mod tests {
         let ssh_config_path = temp_dir.path().join("ssh_config");
         fs::write(&ssh_config_path, ssh_config_content).unwrap();
 
-        let parser =
-            SshConfigParser::load(&ssh_config_path.to_string_lossy()).unwrap();
-        
+        let parser = SshConfigParser::load(&ssh_config_path.to_string_lossy()).unwrap();
+
         let identity_files = parser.get_all_identity_files();
         assert_eq!(identity_files.len(), 1, "Should find one IdentityFile");
 
@@ -336,8 +325,7 @@ mod tests {
             allowed_fingerprints: vec![],
         };
 
-        let provider =
-            ConfigAwareProvider::new(Box::new(mock_provider), Some(parser), config);
+        let provider = ConfigAwareProvider::new(Box::new(mock_provider), Some(parser), config);
         let result = provider.list_keys().await;
 
         assert!(result.is_ok());
@@ -354,8 +342,7 @@ mod tests {
         let ssh_config_path = temp_dir.path().join("ssh_config");
         fs::write(&ssh_config_path, "Host test\n  User testuser\n").unwrap();
 
-        let parser =
-            SshConfigParser::load(&ssh_config_path.to_string_lossy()).unwrap();
+        let parser = SshConfigParser::load(&ssh_config_path.to_string_lossy()).unwrap();
 
         let mock_provider = MockProvider::new(keys);
         let config = KeyFilterConfig {
@@ -364,8 +351,7 @@ mod tests {
             allowed_fingerprints: vec![],
         };
 
-        let provider =
-            ConfigAwareProvider::new(Box::new(mock_provider), Some(parser), config);
+        let provider = ConfigAwareProvider::new(Box::new(mock_provider), Some(parser), config);
         let result = provider.list_keys().await;
 
         assert!(result.is_ok());
@@ -393,8 +379,7 @@ mod tests {
 
         let fp2 = key2.fingerprint(HashAlg::Sha256).to_string();
 
-        let parser =
-            SshConfigParser::load(&ssh_config_path.to_string_lossy()).unwrap();
+        let parser = SshConfigParser::load(&ssh_config_path.to_string_lossy()).unwrap();
 
         let mock_provider = MockProvider::new(keys);
         let config = KeyFilterConfig {
@@ -403,8 +388,7 @@ mod tests {
             allowed_fingerprints: vec![fp2.clone()],
         };
 
-        let provider =
-            ConfigAwareProvider::new(Box::new(mock_provider), Some(parser), config);
+        let provider = ConfigAwareProvider::new(Box::new(mock_provider), Some(parser), config);
         let result = provider.list_keys().await;
 
         assert!(result.is_ok());

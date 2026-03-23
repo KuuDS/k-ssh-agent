@@ -101,14 +101,13 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     // Initialize logging
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| {
-            if args.verbose {
-                EnvFilter::new("debug")
-            } else {
-                EnvFilter::new("info")
-            }
-        });
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        if args.verbose {
+            EnvFilter::new("debug")
+        } else {
+            EnvFilter::new("info")
+        }
+    });
 
     tracing_subscriber::fmt()
         .with_env_filter(filter)
@@ -187,28 +186,30 @@ async fn cmd_run(config: &config::Config, args: &RunArgs) -> Result<()> {
         .unwrap_or_else(|| {
             // Try common Bitwarden SSH agent socket locations in order of preference
             let home = dirs::home_dir().unwrap_or_default();
-            
+
             // Check for Snap installation first (Linux)
             let snap_path = home.join("snap/bitwarden/current/.bitwarden-ssh-agent.sock");
             if snap_path.exists() {
                 debug!("Found Bitwarden Snap installation");
                 return snap_path;
             }
-            
+
             // Check for Flatpak installation (Linux)
-            let flatpak_path = home.join(".var/app/com.bitwarden.desktop/data/.bitwarden-ssh-agent.sock");
+            let flatpak_path =
+                home.join(".var/app/com.bitwarden.desktop/data/.bitwarden-ssh-agent.sock");
             if flatpak_path.exists() {
                 debug!("Found Bitwarden Flatpak installation");
                 return flatpak_path;
             }
-            
+
             // Check for macOS App Store installation
-            let appstore_path = home.join("Library/Containers/com.bitwarden.desktop/Data/.bitwarden-ssh-agent.sock");
+            let appstore_path = home
+                .join("Library/Containers/com.bitwarden.desktop/Data/.bitwarden-ssh-agent.sock");
             if appstore_path.exists() {
                 debug!("Found Bitwarden macOS App Store installation");
                 return appstore_path;
             }
-            
+
             // Default to standard location (~/.bitwarden-ssh-agent.sock)
             debug!("Using default Bitwarden SSH agent socket location");
             home.join(".bitwarden-ssh-agent.sock")
@@ -223,7 +224,9 @@ async fn cmd_run(config: &config::Config, args: &RunArgs) -> Result<()> {
     // Create base FallbackChain
     let mut chain = key_provider::FallbackChain::new();
     chain.add_provider(Box::new(bitwarden::BitwardenProvider::new(bw_path)));
-    chain.add_provider(Box::new(system_agent::SystemAgentProvider::with_socket(original_ssh_auth_sock)));
+    chain.add_provider(Box::new(system_agent::SystemAgentProvider::with_socket(
+        original_ssh_auth_sock,
+    )));
     chain.add_provider(Box::new(default_keys::DefaultKeysProvider::new(
         config.default_keys.clone(),
     )));
@@ -357,22 +360,22 @@ fn cmd_init(args: &InitArgs) -> Result<()> {
     use std::io::{self, Write};
 
     // Determine output path
-    let output_path = args
-        .output
-        .clone()
-        .unwrap_or_else(|| {
-            let home = dirs::home_dir().expect("Could not determine home directory");
-            home.join(".ksshagent/config.toml")
-        });
+    let output_path = args.output.clone().unwrap_or_else(|| {
+        let home = dirs::home_dir().expect("Could not determine home directory");
+        home.join(".ksshagent/config.toml")
+    });
 
     // Check if file exists
     if output_path.exists() && !args.force {
-        print!("Config file already exists at {:?}. Overwrite? [y/N] ", output_path);
+        print!(
+            "Config file already exists at {:?}. Overwrite? [y/N] ",
+            output_path
+        );
         io::stdout().flush()?;
-        
+
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
-        
+
         if !input.trim().eq_ignore_ascii_case("y") {
             println!("Cancelled.");
             return Ok(());

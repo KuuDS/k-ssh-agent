@@ -6,10 +6,10 @@ pub trait KeyProvider: Send + Sync {
     /// Returns the provider name for debugging/logging
     #[allow(dead_code)]
     fn name(&self) -> &str;
-    
+
     /// List all available public keys from this provider
     async fn list_keys(&self) -> KeyProviderResult<Vec<PublicKey>>;
-    
+
     /// Sign data with the specified key
     async fn sign(&self, data: &[u8], key: &PublicKey) -> KeyProviderResult<Signature>;
 }
@@ -25,7 +25,7 @@ impl FallbackChain {
             providers: Vec::new(),
         }
     }
-    
+
     pub fn add_provider(&mut self, provider: Box<dyn KeyProvider>) {
         self.providers.push(provider);
     }
@@ -42,13 +42,13 @@ impl KeyProvider for FallbackChain {
     fn name(&self) -> &str {
         "FallbackChain"
     }
-    
+
     async fn list_keys(&self) -> KeyProviderResult<Vec<PublicKey>> {
         // Try each provider in order, return first successful result
         for provider in &self.providers {
             match provider.list_keys().await {
                 Ok(keys) if !keys.is_empty() => return Ok(keys),
-                Ok(_) => continue, // Empty list, try next provider
+                Ok(_) => continue,  // Empty list, try next provider
                 Err(_) => continue, // Error, try next provider
             }
         }
@@ -56,7 +56,7 @@ impl KeyProvider for FallbackChain {
             "No keys available from any provider".to_string(),
         ))
     }
-    
+
     async fn sign(&self, data: &[u8], key: &PublicKey) -> KeyProviderResult<Signature> {
         // Try each provider in order
         for provider in &self.providers {
@@ -125,9 +125,10 @@ mod tests {
         async fn list_keys(&self) -> KeyProviderResult<Vec<PublicKey>> {
             let should_fail = self.should_fail_list.lock().await;
             if *should_fail {
-                return Err(KeyProviderError::ProviderError(
-                    format!("{} failed", self.name),
-                ));
+                return Err(KeyProviderError::ProviderError(format!(
+                    "{} failed",
+                    self.name
+                )));
             }
             let keys = self.keys.lock().await;
             Ok(keys.clone())
@@ -136,23 +137,24 @@ mod tests {
         async fn sign(&self, _data: &[u8], _key: &PublicKey) -> KeyProviderResult<Signature> {
             let should_fail = self.should_fail_sign.lock().await;
             if *should_fail {
-                return Err(KeyProviderError::SignFailed(
-                    format!("{} sign failed", self.name),
-                ));
+                return Err(KeyProviderError::SignFailed(format!(
+                    "{} sign failed",
+                    self.name
+                )));
             }
             // Create a dummy signature for testing
             // In real implementation, this would be a proper SSH signature
-            use ssh_key::Signature;
             use ssh_key::Algorithm;
-            
+            use ssh_key::Signature;
+
             // Create a minimal valid signature for testing
             // This is a workaround since we can't easily create real signatures in tests
             // without private keys
             let sig_data = vec![0u8; 64]; // Dummy signature bytes
-            
+
             // We'll use a simple algorithm for testing
             let algorithm = Algorithm::Ed25519;
-            
+
             // Create signature - this might need adjustment based on ssh-key API
             // For now, we'll return an error to indicate this is a test placeholder
             // Actually, let's create a proper test signature
@@ -178,13 +180,13 @@ mod tests {
     async fn test_single_provider_success() {
         let mut chain = FallbackChain::new();
         let provider = MockProvider::new("test-provider");
-        
+
         // Add a test key
         let test_key = create_test_public_key();
         provider.add_key(test_key.clone()).await;
-        
+
         chain.add_provider(Box::new(provider));
-        
+
         let result = chain.list_keys().await;
         assert!(result.is_ok());
         let keys = result.unwrap();
@@ -194,19 +196,19 @@ mod tests {
     #[tokio::test]
     async fn test_chain_iteration_on_error() {
         let mut chain = FallbackChain::new();
-        
+
         // First provider fails
         let provider1 = MockProvider::new("failing-provider");
         provider1.set_should_fail_list(true).await;
-        
+
         // Second provider succeeds
         let provider2 = MockProvider::new("working-provider");
         let test_key = create_test_public_key();
         provider2.add_key(test_key.clone()).await;
-        
+
         chain.add_provider(Box::new(provider1));
         chain.add_provider(Box::new(provider2));
-        
+
         let result = chain.list_keys().await;
         assert!(result.is_ok());
         let keys = result.unwrap();
@@ -216,19 +218,19 @@ mod tests {
     #[tokio::test]
     async fn test_chain_iteration_on_empty_result() {
         let mut chain = FallbackChain::new();
-        
+
         // First provider returns empty list
         let provider1 = MockProvider::new("empty-provider");
         // Don't add any keys, so it returns empty list
-        
+
         // Second provider has keys
         let provider2 = MockProvider::new("working-provider");
         let test_key = create_test_public_key();
         provider2.add_key(test_key.clone()).await;
-        
+
         chain.add_provider(Box::new(provider1));
         chain.add_provider(Box::new(provider2));
-        
+
         let result = chain.list_keys().await;
         assert!(result.is_ok());
         let keys = result.unwrap();
@@ -241,9 +243,9 @@ mod tests {
         let provider = MockProvider::new("signer");
         let test_key = create_test_public_key();
         provider.add_key(test_key.clone()).await;
-        
+
         chain.add_provider(Box::new(provider));
-        
+
         let test_data = b"test data to sign";
         let result = chain.sign(test_data, &test_key).await;
         assert!(result.is_ok());
@@ -252,20 +254,20 @@ mod tests {
     #[tokio::test]
     async fn test_sign_chain_iteration() {
         let mut chain = FallbackChain::new();
-        
+
         // First provider fails to sign
         let provider1 = MockProvider::new("failing-signer");
         provider1.set_should_fail_sign(true).await;
         let test_key = create_test_public_key();
         provider1.add_key(test_key.clone()).await;
-        
+
         // Second provider succeeds
         let provider2 = MockProvider::new("working-signer");
         provider2.add_key(test_key.clone()).await;
-        
+
         chain.add_provider(Box::new(provider1));
         chain.add_provider(Box::new(provider2));
-        
+
         let test_data = b"test data to sign";
         let result = chain.sign(test_data, &test_key).await;
         assert!(result.is_ok());
@@ -275,7 +277,7 @@ mod tests {
     async fn test_provider_name() {
         let provider = MockProvider::new("custom-name");
         assert_eq!(provider.name(), "custom-name");
-        
+
         let chain = FallbackChain::new();
         assert_eq!(chain.name(), "FallbackChain");
     }

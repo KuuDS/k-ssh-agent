@@ -6,8 +6,8 @@ use k_ssh_agent::error::{KeyProviderError, KeyProviderResult};
 use k_ssh_agent::key_provider::{FallbackChain, KeyProvider};
 use k_ssh_agent::ssh_config_parser::SshConfigParser;
 use k_ssh_agent::ssh_proto::{
-    SshAgentMessage, SSH_AGENTC_REQUEST_IDENTITIES, SSH_AGENTC_SIGN_REQUEST,
-    SSH_AGENT_FAILURE, SSH_AGENT_IDENTITIES_ANSWER, SSH_AGENT_SIGN_RESPONSE,
+    SshAgentMessage, SSH_AGENTC_REQUEST_IDENTITIES, SSH_AGENTC_SIGN_REQUEST, SSH_AGENT_FAILURE,
+    SSH_AGENT_IDENTITIES_ANSWER, SSH_AGENT_SIGN_RESPONSE,
 };
 use ssh_key::public::{Ed25519PublicKey, KeyData};
 use ssh_key::{HashAlg, PublicKey, Signature};
@@ -105,7 +105,10 @@ async fn test_list_keys_empty() {
         msg_type: SSH_AGENTC_REQUEST_IDENTITIES,
         payload: vec![],
     };
-    request.write(&mut stream).await.expect("Failed to write request");
+    request
+        .write(&mut stream)
+        .await
+        .expect("Failed to write request");
 
     let response = SshAgentMessage::read(&mut stream)
         .await
@@ -135,7 +138,10 @@ async fn test_list_keys_single_key() {
         msg_type: SSH_AGENTC_REQUEST_IDENTITIES,
         payload: vec![],
     };
-    request.write(&mut stream).await.expect("Failed to write request");
+    request
+        .write(&mut stream)
+        .await
+        .expect("Failed to write request");
 
     let response = SshAgentMessage::read(&mut stream)
         .await
@@ -172,7 +178,10 @@ async fn test_list_keys_multiple_keys() {
         msg_type: SSH_AGENTC_REQUEST_IDENTITIES,
         payload: vec![],
     };
-    request.write(&mut stream).await.expect("Failed to write request");
+    request
+        .write(&mut stream)
+        .await
+        .expect("Failed to write request");
 
     let response = SshAgentMessage::read(&mut stream)
         .await
@@ -210,7 +219,10 @@ async fn test_sign_request_success() {
         msg_type: SSH_AGENTC_SIGN_REQUEST,
         payload: sign_request_payload,
     };
-    request.write(&mut stream).await.expect("Failed to write request");
+    request
+        .write(&mut stream)
+        .await
+        .expect("Failed to write request");
 
     let response = SshAgentMessage::read(&mut stream)
         .await
@@ -249,7 +261,10 @@ async fn test_sign_request_with_empty_data() {
         msg_type: SSH_AGENTC_SIGN_REQUEST,
         payload: sign_request_payload,
     };
-    request.write(&mut stream).await.expect("Failed to write request");
+    request
+        .write(&mut stream)
+        .await
+        .expect("Failed to write request");
 
     let response = SshAgentMessage::read(&mut stream)
         .await
@@ -287,7 +302,10 @@ async fn test_sign_request_large_data() {
         msg_type: SSH_AGENTC_SIGN_REQUEST,
         payload: sign_request_payload,
     };
-    request.write(&mut stream).await.expect("Failed to write request");
+    request
+        .write(&mut stream)
+        .await
+        .expect("Failed to write request");
 
     let response = SshAgentMessage::read(&mut stream)
         .await
@@ -322,7 +340,10 @@ async fn test_unknown_message_type() {
         msg_type: 0xFF,
         payload: vec![],
     };
-    request.write(&mut stream).await.expect("Failed to write request");
+    request
+        .write(&mut stream)
+        .await
+        .expect("Failed to write request");
 
     let response = SshAgentMessage::read(&mut stream)
         .await
@@ -349,7 +370,10 @@ async fn test_invalid_message_type_zero() {
         msg_type: 0x00,
         payload: vec![],
     };
-    request.write(&mut stream).await.expect("Failed to write request");
+    request
+        .write(&mut stream)
+        .await
+        .expect("Failed to write request");
 
     let response = SshAgentMessage::read(&mut stream)
         .await
@@ -418,7 +442,10 @@ async fn test_key_filtering_by_fingerprint() {
         msg_type: SSH_AGENTC_REQUEST_IDENTITIES,
         payload: vec![],
     };
-    request.write(&mut stream).await.expect("Failed to write request");
+    request
+        .write(&mut stream)
+        .await
+        .expect("Failed to write request");
 
     let response = SshAgentMessage::read(&mut stream)
         .await
@@ -432,7 +459,10 @@ async fn test_key_filtering_by_fingerprint() {
         response.payload[2],
         response.payload[3],
     ]);
-    assert_eq!(key_count, 1, "Should return only 1 key (filtered by fingerprint)");
+    assert_eq!(
+        key_count, 1,
+        "Should return only 1 key (filtered by fingerprint)"
+    );
 }
 
 #[tokio::test]
@@ -466,7 +496,10 @@ async fn test_key_filtering_by_fingerprint_multiple_allowed() {
         msg_type: SSH_AGENTC_REQUEST_IDENTITIES,
         payload: vec![],
     };
-    request.write(&mut stream).await.expect("Failed to write request");
+    request
+        .write(&mut stream)
+        .await
+        .expect("Failed to write request");
 
     let response = SshAgentMessage::read(&mut stream)
         .await
@@ -509,7 +542,10 @@ async fn test_key_filtering_by_fingerprint_no_match() {
         msg_type: SSH_AGENTC_REQUEST_IDENTITIES,
         payload: vec![],
     };
-    request.write(&mut stream).await.expect("Failed to write request");
+    request
+        .write(&mut stream)
+        .await
+        .expect("Failed to write request");
 
     let response = SshAgentMessage::read(&mut stream)
         .await
@@ -560,13 +596,8 @@ async fn test_key_filtering_by_ssh_config() {
         allowed_fingerprints: vec![],
     };
 
-    let _agent_handle = start_config_aware_agent(
-        socket_path.clone(),
-        all_keys,
-        filter_config,
-        Some(parser),
-    )
-    .await;
+    let _agent_handle =
+        start_config_aware_agent(socket_path.clone(), all_keys, filter_config, Some(parser)).await;
 
     let mut stream = UnixStream::connect(&socket_path)
         .await
@@ -576,7 +607,10 @@ async fn test_key_filtering_by_ssh_config() {
         msg_type: SSH_AGENTC_REQUEST_IDENTITIES,
         payload: vec![],
     };
-    request.write(&mut stream).await.expect("Failed to write request");
+    request
+        .write(&mut stream)
+        .await
+        .expect("Failed to write request");
 
     let response = SshAgentMessage::read(&mut stream)
         .await
@@ -624,7 +658,10 @@ async fn test_key_filtering_disabled_returns_all_keys() {
         msg_type: SSH_AGENTC_REQUEST_IDENTITIES,
         payload: vec![],
     };
-    request.write(&mut stream).await.expect("Failed to write request");
+    request
+        .write(&mut stream)
+        .await
+        .expect("Failed to write request");
 
     let response = SshAgentMessage::read(&mut stream)
         .await
@@ -673,7 +710,10 @@ async fn test_key_filtering_fingerprint_without_sha256_prefix() {
         msg_type: SSH_AGENTC_REQUEST_IDENTITIES,
         payload: vec![],
     };
-    request.write(&mut stream).await.expect("Failed to write request");
+    request
+        .write(&mut stream)
+        .await
+        .expect("Failed to write request");
 
     let response = SshAgentMessage::read(&mut stream)
         .await

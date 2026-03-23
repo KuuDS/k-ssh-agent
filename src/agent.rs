@@ -29,13 +29,16 @@ impl Agent {
     }
 }
 
-pub async fn start_server(socket_path: &Path, key_provider: Arc<Box<dyn KeyProvider>>) -> AgentResult<()> {
+pub async fn start_server(
+    socket_path: &Path,
+    key_provider: Arc<Box<dyn KeyProvider>>,
+) -> AgentResult<()> {
     if socket_path.exists() {
         std::fs::remove_file(socket_path).map_err(AgentError::SocketBindFailed)?;
     }
 
     let listener = UnixListener::bind(socket_path).map_err(AgentError::SocketBindFailed)?;
-    
+
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -105,7 +108,7 @@ async fn handle_connection(
                     // Client disconnected normally, just close the connection
                     return Ok(());
                 }
-                
+
                 // For other errors, send failure response and close
                 let failure = SshAgentMessage {
                     msg_type: SSH_AGENT_FAILURE,
@@ -132,7 +135,7 @@ async fn handle_message(
                     payload,
                 });
             }
-            
+
             match list_all_keys(key_provider).await {
                 Ok(keys) => {
                     let encoded = encode_identities(&keys)?;
@@ -152,26 +155,24 @@ async fn handle_message(
                 }
             }
         }
-        SSH_AGENTC_SIGN_REQUEST => {
-            match sign_data(&msg.payload, key_provider).await {
-                Ok(signature) => {
-                    let encoded = encode_sign_response(&signature)?;
-                    let payload = encoded[5..].to_vec();
-                    Ok(SshAgentMessage {
-                        msg_type: SSH_AGENT_SIGN_RESPONSE,
-                        payload,
-                    })
-                }
-                Err(_) => {
-                    let encoded = encode_failure().unwrap_or_default();
-                    let payload = encoded[5..].to_vec();
-                    Ok(SshAgentMessage {
-                        msg_type: SSH_AGENT_FAILURE,
-                        payload,
-                    })
-                }
+        SSH_AGENTC_SIGN_REQUEST => match sign_data(&msg.payload, key_provider).await {
+            Ok(signature) => {
+                let encoded = encode_sign_response(&signature)?;
+                let payload = encoded[5..].to_vec();
+                Ok(SshAgentMessage {
+                    msg_type: SSH_AGENT_SIGN_RESPONSE,
+                    payload,
+                })
             }
-        }
+            Err(_) => {
+                let encoded = encode_failure().unwrap_or_default();
+                let payload = encoded[5..].to_vec();
+                Ok(SshAgentMessage {
+                    msg_type: SSH_AGENT_FAILURE,
+                    payload,
+                })
+            }
+        },
         _ => {
             eprintln!("Unknown message type: 0x{:02X}", msg.msg_type);
             let encoded = encode_failure().unwrap_or_default();
@@ -196,34 +197,35 @@ async fn list_all_keys(key_provider: &Arc<Box<dyn KeyProvider>>) -> AgentResult<
     }
 }
 
-async fn sign_data(
-    data: &[u8],
-    key_provider: &Arc<Box<dyn KeyProvider>>,
-) -> AgentResult<Vec<u8>> {
+async fn sign_data(data: &[u8], key_provider: &Arc<Box<dyn KeyProvider>>) -> AgentResult<Vec<u8>> {
     if data.len() < 4 {
-        return Err(AgentError::ProtocolError("Sign request too short".to_string()));
+        return Err(AgentError::ProtocolError(
+            "Sign request too short".to_string(),
+        ));
     }
-    
+
     // Extract the public key from the sign request data
     // The format is: [4-byte key blob length][key blob][4-byte data length][data]
     let key_blob_len = u32::from_be_bytes([data[0], data[1], data[2], data[3]]) as usize;
     if data.len() < 4 + key_blob_len + 4 {
-        return Err(AgentError::ProtocolError("Sign request too short".to_string()));
+        return Err(AgentError::ProtocolError(
+            "Sign request too short".to_string(),
+        ));
     }
-    
+
     let key_blob = &data[4..4 + key_blob_len];
     let sign_data = &data[4 + key_blob_len + 4..];
-    
+
     // Parse the public key from the blob
     let key = PublicKey::from_bytes(key_blob)
         .map_err(|e| AgentError::ProtocolError(format!("Invalid key blob: {}", e)))?;
-    
+
     // Use the fallback chain's sign method which handles iteration internally
     let signature = key_provider.sign(sign_data, &key).await.map_err(|e| {
         eprintln!("Failed to sign data with fallback chain: {}", e);
         AgentError::NoKeys
     })?;
-    
+
     Ok(signature.as_bytes().to_vec())
 }
 
@@ -236,7 +238,10 @@ mod tests {
     use super::*;
     use crate::error::{KeyProviderError, KeyProviderResult};
     use crate::key_provider::FallbackChain;
-    use ssh_key::{public::{Ed25519PublicKey, KeyData}, Signature};
+    use ssh_key::{
+        public::{Ed25519PublicKey, KeyData},
+        Signature,
+    };
     use tokio::sync::Mutex;
 
     struct MockProvider {
@@ -281,9 +286,10 @@ mod tests {
         async fn list_keys(&self) -> KeyProviderResult<Vec<PublicKey>> {
             let should_fail = self.should_fail_list.lock().await;
             if *should_fail {
-                return Err(KeyProviderError::ProviderError(
-                    format!("{} failed", self.name),
-                ));
+                return Err(KeyProviderError::ProviderError(format!(
+                    "{} failed",
+                    self.name
+                )));
             }
             let keys = self.keys.lock().await;
             Ok(keys.clone())
@@ -292,14 +298,16 @@ mod tests {
         async fn sign(&self, _data: &[u8], _key: &PublicKey) -> KeyProviderResult<Signature> {
             let should_fail = self.should_fail_sign.lock().await;
             if *should_fail {
-                return Err(KeyProviderError::SignFailed(
-                    format!("{} sign failed", self.name),
-                ));
+                return Err(KeyProviderError::SignFailed(format!(
+                    "{} sign failed",
+                    self.name
+                )));
             }
-            
+
             let sig_data = vec![0u8; 64];
-            Signature::new(ssh_key::Algorithm::Ed25519, sig_data)
-                .map_err(|e| KeyProviderError::SignFailed(format!("Failed to create signature: {}", e)))
+            Signature::new(ssh_key::Algorithm::Ed25519, sig_data).map_err(|e| {
+                KeyProviderError::SignFailed(format!("Failed to create signature: {}", e))
+            })
         }
     }
 
@@ -337,7 +345,7 @@ mod tests {
         let provider = MockProvider::new("test");
         let test_key = create_test_public_key();
         provider.add_key(test_key.clone()).await;
-        
+
         chain.add_provider(Box::new(provider));
         let key_provider: Arc<Box<dyn KeyProvider>> = Arc::new(Box::new(chain));
         let keys = list_all_keys(&key_provider).await.unwrap();
@@ -350,15 +358,15 @@ mod tests {
         let provider1 = MockProvider::new("provider1");
         let key1 = create_test_public_key();
         provider1.add_key(key1.clone()).await;
-        
+
         let provider2 = MockProvider::new("provider2");
         let key2 = create_test_public_key();
         provider2.add_key(key2.clone()).await;
-        
+
         chain.add_provider(Box::new(provider1));
         chain.add_provider(Box::new(provider2));
         let key_provider: Arc<Box<dyn KeyProvider>> = Arc::new(Box::new(chain));
-        
+
         // FallbackChain returns keys from first successful provider
         let keys = list_all_keys(&key_provider).await.unwrap();
         assert_eq!(keys.len(), 1);
@@ -369,15 +377,15 @@ mod tests {
         let mut chain = FallbackChain::new();
         let provider1 = MockProvider::new("failing");
         provider1.set_should_fail_list(true).await;
-        
+
         let provider2 = MockProvider::new("working");
         let test_key = create_test_public_key();
         provider2.add_key(test_key.clone()).await;
-        
+
         chain.add_provider(Box::new(provider1));
         chain.add_provider(Box::new(provider2));
         let key_provider: Arc<Box<dyn KeyProvider>> = Arc::new(Box::new(chain));
-        
+
         let keys = list_all_keys(&key_provider).await.unwrap();
         assert_eq!(keys.len(), 1);
     }
@@ -388,13 +396,13 @@ mod tests {
         let provider = MockProvider::new("signer");
         let test_key = create_test_public_key();
         provider.add_key(test_key.clone()).await;
-        
+
         chain.add_provider(Box::new(provider));
         let key_provider: Arc<Box<dyn KeyProvider>> = Arc::new(Box::new(chain));
-        
+
         let test_data = b"test data";
         let request = create_test_sign_request(&test_key, test_data);
-        
+
         let result = sign_data(&request, &key_provider).await;
         assert!(result.is_ok());
         assert!(!result.unwrap().is_empty());
@@ -407,14 +415,14 @@ mod tests {
         provider1.set_should_fail_sign(true).await;
         let test_key = create_test_public_key();
         provider1.add_key(test_key.clone()).await;
-        
+
         let provider2 = MockProvider::new("working-signer");
         provider2.add_key(test_key.clone()).await;
-        
+
         chain.add_provider(Box::new(provider1));
         chain.add_provider(Box::new(provider2));
         let key_provider: Arc<Box<dyn KeyProvider>> = Arc::new(Box::new(chain));
-        
+
         let test_data = b"test data";
         let request = create_test_sign_request(&test_key, test_data);
         let result = sign_data(&request, &key_provider).await;
@@ -427,7 +435,7 @@ mod tests {
         let key_provider: Arc<Box<dyn KeyProvider>> = Arc::new(Box::new(chain));
         let test_data = b"test data";
         let request = create_test_sign_request(&create_test_public_key(), test_data);
-        
+
         let result = sign_data(&request, &key_provider).await;
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), AgentError::NoKeys));
@@ -439,15 +447,15 @@ mod tests {
         let provider = MockProvider::new("test");
         let test_key = create_test_public_key();
         provider.add_key(test_key.clone()).await;
-        
+
         chain.add_provider(Box::new(provider));
         let key_provider: Arc<Box<dyn KeyProvider>> = Arc::new(Box::new(chain));
-        
+
         let msg = SshAgentMessage {
             msg_type: SSH_AGENTC_REQUEST_IDENTITIES,
             payload: vec![],
         };
-        
+
         let result = handle_message(msg, &key_provider).await;
         assert!(result.is_ok());
         let response = result.unwrap();
@@ -458,12 +466,12 @@ mod tests {
     async fn test_handle_message_unknown_type() {
         let chain = FallbackChain::new();
         let key_provider: Arc<Box<dyn KeyProvider>> = Arc::new(Box::new(chain));
-        
+
         let msg = SshAgentMessage {
             msg_type: 0xFF,
             payload: vec![],
         };
-        
+
         let result = handle_message(msg, &key_provider).await;
         assert!(result.is_ok());
         let response = result.unwrap();

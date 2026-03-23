@@ -80,6 +80,8 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
       - run: cargo audit
 
   build-macos-aarch64:
