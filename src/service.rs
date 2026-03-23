@@ -197,17 +197,21 @@ impl ServiceManager {
             anyhow::bail!("Service is not installed. Run 'k-ssh-agent service install' first.");
         }
 
+        if self.is_running()? {
+            println!("Service is already running.");
+            return Ok(());
+        }
+
         let output = Command::new("launchctl")
-            .args(["bootstrap", "gui/"])
-            .arg(self.get_uid().to_string())
+            .args(["load", "-w"])
             .arg(&self.plist_path)
             .output()
-            .context("Failed to execute launchctl bootstrap")?;
+            .context("Failed to execute launchctl load")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             if stderr.contains("already") || stderr.contains("exists") {
-                println!("Service is already loaded. Use 'restart' instead.");
+                println!("Service is already loaded.");
                 return Ok(());
             }
             anyhow::bail!("Failed to start service: {}", stderr);
@@ -224,9 +228,13 @@ impl ServiceManager {
 
         info!("Stopping k-ssh-agent service...");
 
+        if !self.is_running()? {
+            println!("Service is not running");
+            return Ok(());
+        }
+
         let output = Command::new("launchctl")
-            .args(["bootout", "gui/"])
-            .arg(self.get_uid().to_string())
+            .args(["unload", "-w"])
             .arg(&self.plist_path)
             .output();
 
@@ -238,17 +246,13 @@ impl ServiceManager {
                         println!("Service is not running");
                         return Ok(());
                     }
-                    if stderr.contains("No such process") {
-                        println!("Service is not running");
-                        return Ok(());
-                    }
                     anyhow::bail!("Failed to stop service: {}", stderr);
                 }
                 println!("✓ Service stopped successfully");
                 info!("Service stopped");
             }
             Err(e) => {
-                debug!("Failed to execute launchctl bootout: {}", e);
+                debug!("Failed to execute launchctl unload: {}", e);
                 println!("Service is not running");
             }
         }
@@ -314,10 +318,6 @@ impl ServiceManager {
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         Ok(stdout.contains(&self.label))
-    }
-
-    fn get_uid(&self) -> u32 {
-        unsafe { libc::getuid() }
     }
 }
 
