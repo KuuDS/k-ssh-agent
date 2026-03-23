@@ -14,11 +14,47 @@ This allows you to use your Bitwarden-stored SSH keys transparently with existin
 
 ## Installation
 
+### Quick Install (Recommended)
+
+Install the latest release with a single command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/KuuDS/k-ssh-agent/main/install.sh | bash
+```
+
+This will download and install `k-ssh-agent` to `~/.local/bin` (or `~/bin` if available).
+
+#### Install Nightly Version
+
+To install the latest nightly build instead of the stable release:
+
+```bash
+KSSH_AGENT_CHANNEL=nightly curl -fsSL https://raw.githubusercontent.com/KuuDS/k-ssh-agent/main/install.sh | bash
+```
+
+#### Custom Install Directory
+
+To install to a custom directory:
+
+```bash
+KSSH_AGENT_INSTALL_DIR=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/KuuDS/k-ssh-agent/main/install.sh | bash
+```
+
+#### Supported Platforms
+
+| Platform | Architecture | Status |
+|----------|--------------|--------|
+| macOS    | Apple Silicon (aarch64) | ✓ Supported |
+| macOS    | Intel (x86_64) | Planned |
+| Linux    | x86_64/aarch64 | Planned |
+
+For unsupported platforms, please [build from source](#from-source).
+
 ### From Source
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/k-ssh-agent.git
+git clone https://github.com/KuuDS/k-ssh-agent.git
 cd k-ssh-agent
 
 # Build and install
@@ -26,11 +62,11 @@ cargo build --release
 cargo install --path .
 ```
 
-### Direct Install
+### Direct Install via Cargo
 
 ```bash
 # Install directly from Git repository
-cargo install --git https://github.com/your-username/k-ssh-agent
+cargo install --git https://github.com/KuuDS/k-ssh-agent
 ```
 
 ## Quick Start
