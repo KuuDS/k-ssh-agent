@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::{debug, info, warn};
 
@@ -65,7 +65,7 @@ impl ServiceManager {
         Ok(exe_path)
     }
 
-    fn generate_plist(&self, exe_path: &PathBuf) -> String {
+    fn generate_plist(&self, exe_path: &Path) -> String {
         let exe_path_str = exe_path.to_string_lossy();
 
         format!(
